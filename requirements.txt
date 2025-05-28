@@ -1,0 +1,6 @@
+Flask
+requests
+pytesseract
+opencv-python
+numpy
+PyMuPDF
