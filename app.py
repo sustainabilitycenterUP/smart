@@ -12,7 +12,7 @@ from flask import Flask, request, jsonify, send_file, render_template_string
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from fpdf import FPDF
-from datetime import timezone
+from datetime import timezone, datetime
 from collections import Counter
 from zoneinfo import ZoneInfo
 
@@ -224,18 +224,34 @@ def extract_abstract_api():
 
 @app.route("/admin", methods=["GET"])
 def admin_dashboard():
-    total, last_upload, recent = get_insight()  # recent: list of (filename, timestamp, ip, location, sdg)
-    
-    # Agregasi jumlah upload per bulan (format: "YYYY-MM")
-    month_counts = Counter(
-        t.astimezone(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m")
-        for _, t, _, _, _ in recent
-    )
+    # Koneksi ke database
+    conn = sqlite3.connect("database.db")  # sesuaikan dengan nama DB Anda
+    cur = conn.cursor()
 
-    # Urutkan berdasarkan waktu
+    # Ambil semua data upload_time
+    cur.execute("SELECT upload_time FROM uploads_new")
+    all_times = [datetime.fromisoformat(row[0]) for row in cur.fetchall() if row[0]]
+
+    # Ambil 10 data terakhir
+    cur.execute("""
+        SELECT filename, upload_time, ip, location, sdg
+        FROM uploads_new
+        ORDER BY upload_time DESC
+        LIMIT 10
+    """)
+    recent = [(f, datetime.fromisoformat(t), ip, loc, sdg) for f, t, ip, loc, sdg in cur.fetchall()]
+
+    # Insight sederhana
+    total = len(all_times)
+    last_upload = max(all_times) if all_times else None
+
+    # Hitung jumlah upload per bulan (YYYY-MM)
+    month_counts = Counter(dt.strftime("%Y-%m") for dt in all_times)
     sorted_months = sorted(month_counts.keys(), key=lambda x: datetime.strptime(x, "%Y-%m"))
     month_labels = [m for m in sorted_months]
     month_values = [month_counts[m] for m in sorted_months]
+
+    conn.close()
 
     html = f"""
     <!DOCTYPE html>
