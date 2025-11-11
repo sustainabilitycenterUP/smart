@@ -13,6 +13,7 @@ from flask_cors import CORS
 from werkzeug.utils import secure_filename
 from fpdf import FPDF
 from datetime import timezone
+from collections import Counter
 from zoneinfo import ZoneInfo
 
 # ==== ReportLab for PDF Generation ====
@@ -223,13 +224,25 @@ def extract_abstract_api():
 
 @app.route("/admin", methods=["GET"])
 def admin_dashboard():
-    total, last_upload, recent = get_insight()
+    total, last_upload, recent = get_insight()  # recent: list of (filename, timestamp, ip, location, sdg)
     
+    # Agregasi jumlah upload per bulan (format: "YYYY-MM")
+    month_counts = Counter(
+        t.astimezone(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m")
+        for _, t, _, _, _ in recent
+    )
+
+    # Urutkan berdasarkan waktu
+    sorted_months = sorted(month_counts.keys(), key=lambda x: datetime.strptime(x, "%Y-%m"))
+    month_labels = [m for m in sorted_months]
+    month_values = [month_counts[m] for m in sorted_months]
+
     html = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <title>Platform Insight</title>
+        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
             body {{
                 font-family: Arial, sans-serif;
@@ -264,6 +277,10 @@ def admin_dashboard():
             tr:nth-child(even) {{
                 background-color: #f8f8f8;
             }}
+            canvas {{
+                max-width: 100%;
+                height: 400px;
+            }}
         </style>
     </head>
     <body>
@@ -271,6 +288,11 @@ def admin_dashboard():
             <h1>📊 Platform Insight</h1>
             <p><strong>Total uploads:</strong> {total}</p>
             <p><strong>Last upload:</strong> {last_upload.astimezone(ZoneInfo("Asia/Jakarta")).strftime('%Y-%m-%d %H:%M:%S') if last_upload else 'N/A'}</p>
+        </div>
+
+        <div class="section">
+            <h2>📈 Upload Trend per Month</h2>
+            <canvas id="uploadChart"></canvas>
         </div>
 
         <div class="section">
@@ -299,6 +321,44 @@ def admin_dashboard():
                 </tbody>
             </table>
         </div>
+
+        <script>
+            const ctx = document.getElementById('uploadChart').getContext('2d');
+            const uploadChart = new Chart(ctx, {{
+                type: 'line',
+                data: {{
+                    labels: {month_labels},
+                    datasets: [{{
+                        label: 'Uploads per Month',
+                        data: {month_values},
+                        borderColor: '#4A148C',
+                        backgroundColor: 'rgba(74, 20, 140, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#4A148C'
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    scales: {{
+                        y: {{
+                            beginAtZero: true,
+                            title: {{
+                                display: true,
+                                text: 'Number of Uploads'
+                            }}
+                        }},
+                        x: {{
+                            title: {{
+                                display: true,
+                                text: 'Month-Year'
+                            }}
+                        }}
+                    }}
+                }}
+            }});
+        </script>
     </body>
     </html>
     """
