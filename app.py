@@ -224,15 +224,12 @@ def extract_abstract_api():
 
 @app.route("/admin", methods=["GET"])
 def admin_dashboard():
-    # Koneksi ke PostgreSQL Railway
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
 
-    # Ambil semua data upload_time
     cur.execute("SELECT upload_time FROM uploads_new")
     all_times = [row[0] for row in cur.fetchall() if row[0]]
 
-    # Ambil 10 data terakhir
     cur.execute("""
         SELECT filename, upload_time, ip, location, sdg
         FROM uploads_new
@@ -244,14 +241,21 @@ def admin_dashboard():
     total = len(all_times)
     last_upload = max(all_times) if all_times else None
 
-    # Hitung jumlah upload per bulan (YYYY-MM)
     from collections import Counter
     from datetime import datetime
     from zoneinfo import ZoneInfo
+
     month_counts = Counter(dt.strftime("%Y-%m") for dt in all_times)
     sorted_months = sorted(month_counts.keys(), key=lambda x: datetime.strptime(x, "%Y-%m"))
     month_labels = [m for m in sorted_months]
     month_values = [month_counts[m] for m in sorted_months]
+
+    # Hitung cumulative (agregat)
+    cumulative_values = []
+    cumulative_sum = 0
+    for val in month_values:
+        cumulative_sum += val
+        cumulative_values.append(cumulative_sum)
 
     conn.close()
 
@@ -296,8 +300,15 @@ def admin_dashboard():
                 background-color: #f8f8f8;
             }}
             canvas {{
-                max-width: 100%;
-                height: 400px;
+                width: 100%;
+                height: auto;
+                max-height: 350px;
+                display: block;
+                margin: 0 auto;
+            }}
+            .chart-container {{
+                width: 65%;
+                margin: 0 auto;
             }}
         </style>
     </head>
@@ -310,7 +321,16 @@ def admin_dashboard():
 
         <div class="section">
             <h2>📈 Upload Trend per Month</h2>
-            <canvas id="uploadChart"></canvas>
+            <div class="chart-container">
+                <canvas id="uploadChart"></canvas>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📈 Cumulative Upload Growth</h2>
+            <div class="chart-container">
+                <canvas id="cumulativeChart"></canvas>
+            </div>
         </div>
 
         <div class="section">
@@ -341,8 +361,9 @@ def admin_dashboard():
         </div>
 
         <script>
-            const ctx = document.getElementById('uploadChart').getContext('2d');
-            const uploadChart = new Chart(ctx, {{
+            // Chart 1: Monthly uploads
+            const ctx1 = document.getElementById('uploadChart').getContext('2d');
+            new Chart(ctx1, {{
                 type: 'line',
                 data: {{
                     labels: {month_labels},
@@ -353,7 +374,7 @@ def admin_dashboard():
                         backgroundColor: 'rgba(74, 20, 140, 0.1)',
                         fill: true,
                         tension: 0.3,
-                        pointRadius: 5,
+                        pointRadius: 4,
                         pointBackgroundColor: '#4A148C'
                     }}]
                 }},
@@ -376,11 +397,49 @@ def admin_dashboard():
                     }}
                 }}
             }});
+
+            // Chart 2: Cumulative uploads
+            const ctx2 = document.getElementById('cumulativeChart').getContext('2d');
+            new Chart(ctx2, {{
+                type: 'line',
+                data: {{
+                    labels: {month_labels},
+                    datasets: [{{
+                        label: 'Cumulative Uploads',
+                        data: {cumulative_values},
+                        borderColor: '#00695C',
+                        backgroundColor: 'rgba(0, 150, 136, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointBackgroundColor: '#00695C'
+                    }}]
+                }},
+                options: {{
+                    responsive: true,
+                    scales: {{
+                        y: {{
+                            beginAtZero: true,
+                            title: {{
+                                display: true,
+                                text: 'Total Uploads (Cumulative)'
+                            }}
+                        }},
+                        x: {{
+                            title: {{
+                                display: true,
+                                text: 'Month-Year'
+                            }}
+                        }}
+                    }}
+                }}
+            }});
         </script>
     </body>
     </html>
     """
     return render_template_string(html)
+
 
 
 
