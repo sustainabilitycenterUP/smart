@@ -224,13 +224,13 @@ def extract_abstract_api():
 
 @app.route("/admin", methods=["GET"])
 def admin_dashboard():
-    # Koneksi ke database
-    conn = sqlite3.connect("database.db")  # sesuaikan dengan nama DB Anda
+    # Koneksi ke PostgreSQL Railway
+    conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
 
     # Ambil semua data upload_time
     cur.execute("SELECT upload_time FROM uploads_new")
-    all_times = [datetime.fromisoformat(row[0]) for row in cur.fetchall() if row[0]]
+    all_times = [row[0] for row in cur.fetchall() if row[0]]
 
     # Ambil 10 data terakhir
     cur.execute("""
@@ -239,13 +239,15 @@ def admin_dashboard():
         ORDER BY upload_time DESC
         LIMIT 10
     """)
-    recent = [(f, datetime.fromisoformat(t), ip, loc, sdg) for f, t, ip, loc, sdg in cur.fetchall()]
+    recent = cur.fetchall()
 
-    # Insight sederhana
     total = len(all_times)
     last_upload = max(all_times) if all_times else None
 
     # Hitung jumlah upload per bulan (YYYY-MM)
+    from collections import Counter
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
     month_counts = Counter(dt.strftime("%Y-%m") for dt in all_times)
     sorted_months = sorted(month_counts.keys(), key=lambda x: datetime.strptime(x, "%Y-%m"))
     month_labels = [m for m in sorted_months]
@@ -379,6 +381,7 @@ def admin_dashboard():
     </html>
     """
     return render_template_string(html)
+
 
 
 @app.route('/download_result', methods=['POST'])
