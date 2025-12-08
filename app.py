@@ -69,30 +69,35 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # ------------------ UTILITAS PDF ------------------
 
+
 def remove_illegal_chars(text):
     return re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]', "", text)
+
 
 def extract_text_with_fitz(pdf_path):
     with fitz.open(pdf_path) as doc:
         return "\n".join(page.get_text("text") for page in doc)
 
+
 def extract_text_from_pdf(pdf_path):
     text = extract_text_with_fitz(pdf_path)
     return remove_illegal_chars(text)
 
+
 def draw_header(canvas, doc):
     logo_path = "uploads/LOGO_SC.jpg"
-    logo_width = 2.8 * inch  
-    logo_height = logo_width * (0.55 / 2.2)  #rasio
+    logo_width = 2.8 * inch
+    logo_height = logo_width * (0.55 / 2.2)  # rasio
 
     page_width, page_height = A4
     x = (page_width - logo_width) / 2
     y = page_height - logo_height - 0.2 * inch
 
-    canvas.drawImage(logo_path, x, y, width=logo_width, height=logo_height, preserveAspectRatio=True)
+    canvas.drawImage(logo_path, x, y, width=logo_width,
+                     height=logo_height, preserveAspectRatio=True)
 
     text = "SDG Mapping and Assessment Report"
-    canvas.setFont("ArialNova-Bold", 20)  
+    canvas.setFont("ArialNova-Bold", 20)
     text_width = canvas.stringWidth(text, "ArialNova-Bold", 20)
     x = (page_width - text_width) / 2
     y = page_height - 1.5 * inch
@@ -100,16 +105,24 @@ def draw_header(canvas, doc):
     canvas.drawString(x, y, text)
 
 
-
 def draw_footer(canvas, doc):
     footer_path = "uploads/footer.png"
     footer_width = doc.pagesize[0]
-    footer_height = 0.9 * inch  
+    footer_height = 0.9 * inch
 
     x = 0
-    y = 0  
+    y = 0
 
-    canvas.drawImage(footer_path, x, y, width=footer_width, height=footer_height, preserveAspectRatio=True, mask='auto')
+    canvas.drawImage(
+        footer_path,
+        x,
+        y,
+        width=footer_width,
+        height=footer_height,
+        preserveAspectRatio=True,
+        mask='auto'
+    )
+
 
 def draw_first_page(canvas, doc):
     draw_header(canvas, doc)
@@ -129,7 +142,8 @@ def extract_abstract(text):
 
     if abstract_match:
         abstract_start = abstract_match.end()
-        stop_after_abstract = re.search(stop_heading_pattern, text[abstract_start:])
+        stop_after_abstract = re.search(
+            stop_heading_pattern, text[abstract_start:])
         if stop_after_abstract:
             abstract_end = abstract_start + stop_after_abstract.start()
             return text[abstract_start:abstract_end].strip()
@@ -147,8 +161,23 @@ def extract_abstract(text):
         else:
             return " ".join(text.split()[:300])
 
-def classify_with_aurora(abstract):
-    url = "https://aurora-sdg.labs.vu.nl/classifier/classify/elsevier-sdg-multi"
+
+# ------------------ KLASIFIKASI MODEL ------------------
+
+
+def classify_with_model(abstract, model="elsevier"):
+    """
+    Memanggil model SDG berdasarkan pilihan:
+      - "elsevier" → elsevier-sdg-multi (16 goals, THE)
+      - "aurora"   → aurora-sdg-multi (17 goals)
+    """
+    if model == "aurora":
+        url = "https://aurora-sdg.labs.vu.nl/classifier/classify/aurora-sdg-multi"
+    else:
+        # default ke Elsevier
+        model = "elsevier"
+        url = "https://aurora-sdg.labs.vu.nl/classifier/classify/elsevier-sdg-multi"
+
     headers = {"Content-Type": "application/json"}
     payload = json.dumps({"text": abstract})
 
@@ -162,25 +191,26 @@ def classify_with_aurora(abstract):
                 for p in predictions
             }
 
-            # Logging top N atau semua
-            logging.info("✅ SDG Classification (All):")
+            logging.info(f"✅ SDG Classification ({model}):")
             for label, score in sorted(all_sdg_scores.items(), key=lambda x: x[1], reverse=True):
                 logging.info(f"- {label}: {score}%")
 
-            return all_sdg_scores  # ← dikembalikan dalam format dict langsung
+            return all_sdg_scores
         else:
-            logging.error(f"❌ Gagal panggil API Aurora: {response.status_code}")
+            logging.error(
+                f"❌ Gagal panggil API SDG model={model}: {response.status_code}")
             return {}
     except Exception as e:
-        logging.error(f"❌ Error saat memanggil API Aurora: {str(e)}")
+        logging.error(
+            f"❌ Error saat memanggil API SDG model={model}: {str(e)}")
         return {}
 
 
-def process_single_pdf(pdf_path):
+def process_single_pdf(pdf_path, model="elsevier"):
     try:
         full_text = extract_text_from_pdf(pdf_path)
         abstract = extract_abstract(full_text)
-        sdg_result = classify_with_aurora(abstract)
+        sdg_result = classify_with_model(abstract, model=model)
         return {
             "status": "success",
             "abstract": abstract,
@@ -192,15 +222,17 @@ def process_single_pdf(pdf_path):
 
 # ------------------ ROUTES ------------------
 
+
 @app.route("/", methods=["GET"])
 def index():
-    return "✅ API is running. Use /extract-abstract or /forminator-webhook."
+    return "✅ API is running. Use /extract-abstract or /classify-text."
+
 
 @app.route("/classify-text", methods=["POST"])
 def classify_text_api():
     """
     Klasifikasi langsung dari teks (tanpa PDF).
-    Body: JSON { "text": "..." }
+    Body: JSON { "text": "...", "model": "elsevier" | "aurora" }
     Response: sama formatnya dengan /extract-abstract
     """
     data = request.get_json()
@@ -211,21 +243,19 @@ def classify_text_api():
     if not text:
         return jsonify({"status": "error", "message": "Text is empty."}), 400
 
-    # di sini teks yang di-paste user kita perlakukan sebagai "abstract"
+    model = data.get("model", "elsevier")
+
     abstract = text
+    sdg_result = classify_with_model(abstract, model=model)
 
-    # pakai fungsi yang sudah ada
-    sdg_result = classify_with_aurora(abstract)
-
-    # untuk logging SDG-nya di DB (sama seperti PDF)
     sdg_list = [
         int(sdg.replace("Goal ", ""))
         for sdg, score in sdg_result.items()
         if score > 30
     ]
 
-    # filename dummy untuk text input
-    submission_id = log_upload("TEXT_INPUT", request.remote_addr, sdg_list)
+    filename_label = f"TEXT_INPUT_{model.upper()}"
+    submission_id = log_upload(filename_label, request.remote_addr, sdg_list)
 
     return jsonify({
         "status": "success",
@@ -244,15 +274,21 @@ def extract_abstract_api():
     if file.filename == "":
         return jsonify({"status": "error", "message": "Filename is empty."}), 400
 
+    # model dipilih dari form (Elsevier / Aurora)
+    model = request.form.get("model", "elsevier")
+
     filename = secure_filename(file.filename)
     file_path = os.path.join(UPLOAD_FOLDER, filename)
     file.save(file_path)
-    result = process_single_pdf(file_path)
+
+    result = process_single_pdf(file_path, model=model)
 
     sdg_list = []
     if result.get("status") == "success":
         sdg_scores = result.get("sdg", {})
-        sdg_list = [int(sdg.replace("Goal ", "")) for sdg, score in sdg_scores.items() if score > 30]
+        sdg_list = [
+            int(sdg.replace("Goal ", "")) for sdg, score in sdg_scores.items() if score > 30
+        ]
 
     submission_id = log_upload(filename, request.remote_addr, sdg_list)
 
@@ -285,11 +321,11 @@ def admin_dashboard():
     from zoneinfo import ZoneInfo
 
     month_counts = Counter(dt.strftime("%Y-%m") for dt in all_times)
-    sorted_months = sorted(month_counts.keys(), key=lambda x: datetime.strptime(x, "%Y-%m"))
+    sorted_months = sorted(month_counts.keys(),
+                           key=lambda x: datetime.strptime(x, "%Y-%m"))
     month_labels = [m for m in sorted_months]
     month_values = [month_counts[m] for m in sorted_months]
 
-    # Hitung cumulative (agregat)
     cumulative_values = []
     cumulative_sum = 0
     for val in month_values:
@@ -400,7 +436,6 @@ def admin_dashboard():
         </div>
 
         <script>
-            // Chart 1: Monthly uploads
             const ctx1 = document.getElementById('uploadChart').getContext('2d');
             new Chart(ctx1, {{
                 type: 'line',
@@ -437,7 +472,6 @@ def admin_dashboard():
                 }}
             }});
 
-            // Chart 2: Cumulative uploads
             const ctx2 = document.getElementById('cumulativeChart').getContext('2d');
             new Chart(ctx2, {{
                 type: 'line',
@@ -480,41 +514,56 @@ def admin_dashboard():
     return render_template_string(html)
 
 
-
-
 @app.route('/download_result', methods=['POST'])
 def download_result():
     logging.info("📥 POST /download_result called")
     data = request.get_json()
     logging.info(f"📥 Payload received: {data}")
-    
-    data = request.get_json()
+
     submission_id = data.get("submission_id")
     if not submission_id:
         return jsonify({"status": "error", "message": "submission_id is required"}), 400
-    
+
     record = get_submission_detail(submission_id)
     if not record:
         return jsonify({"status": "error", "message": "Submission ID not found"}), 404
-    
+
     filename = record["filename"].rsplit(".", 1)[0]
     upload_time = record["created_at"]
     sdg_ids = record["sdg"] or []
-    
+
     submission_id_str = f"{submission_id:05d}"
-    submission_date_str = upload_time.astimezone(ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
-    
-    # Ambil dari frontend tetap:
+    submission_date_str = upload_time.astimezone(
+        ZoneInfo("Asia/Jakarta")).strftime("%Y-%m-%d %H:%M:%S")
+
     abstract = data.get("abstract", "")
     sdg_scores = data.get("sdg", {})
 
-    # Prepare PDF in memory
+    # --- Model info from frontend (optional, default: elsevier) ---
+    model = data.get("model", "elsevier")
+    if model == "aurora":
+        model = "aurora"
+        model_full_name = "Aurora SDG multi-label mBERT model"
+        model_desc = (
+            "This report was generated using the Aurora SDG multi-label mBERT model, "
+            "which classifies text into all 17 SDG goals with an average precision of around 70.05%."
+        )
+        goal_info = "multi-label classification across 17 SDG goals."
+    else:
+        model = "elsevier"
+        model_full_name = "Elsevier SDG multi-class mBERT model"
+        model_desc = (
+            "This report was generated using the Elsevier SDG multi-class mBERT model, "
+            "which classifies text into 16 SDG goals and is used in the THE Impact Rankings methodology."
+        )
+        goal_info = "multi-class classification across 16 SDG goals."
+
     buffer = BytesIO()
     doc = SimpleDocTemplate(
-            buffer,
-            pagesize=A4,
-            topMargin=1* inch  # atur agar isi tidak nabrak header
-        )
+        buffer,
+        pagesize=A4,
+        topMargin=1 * inch
+    )
     doc.title = "SMART SDG Classifier"
     doc.author = "https://super.universitaspertamina.ac.id/index.php/smart/"
     styles = getSampleStyleSheet()
@@ -563,33 +612,37 @@ def download_result():
         17: "Partnerships for the Goals"
     }
 
-    # Title
+    # Title space
     elements.append(Spacer(1, 42))
 
-    # General Notes
+    # General Notes (now model-aware + jelaskan PDF vs text flow)
     elements.append(Paragraph("General Notes", heading_style))
-    notes = """
-    This application performs Sustainable Development Goal (SDG) classification based on the abstract extracted from a PDF document.
-    The document is parsed using the fitz library (PyMuPDF), which allows structured reading and text extraction.<br/><br/>
-    The application first attempts to detect and extract the abstract section from the PDF. If an abstract is not detected, 
-    the fallback mechanism extracts the first 500 words from the document as a proxy for the abstract.<br/><br/>
-    The extracted text is then analyzed using the Aurora SDG multi-label mBERT model (https://aurora-sdg.labs.vu.nl/sdg-classifier/text). 
-    This model performs multi-label classification across all 17 Sustainable Development Goals (SDGs).<br/><br/>
-    The output consists of percentage scores (ranging from 0% to 100%) for each SDG, indicating the degree of relevance between the input text and each goal. 
-    Multiple SDGs can be associated with a single document depending on the model’s confidence levels.<br/><br/>
-    This abstract-based analysis enables efficient and scalable SDG classification.
+    notes = f"""
+    This application performs Sustainable Development Goal (SDG) classification based on either an abstract automatically extracted
+    from a PDF document or text directly provided by the user.<br/><br/>
+    <b>Model used:</b> {model_full_name}. {model_desc} It performs {goal_info}<br/><br/>
+    <b>Processing flow:</b><br/>
+    1. <b>PDF uploads:</b> The PDF is parsed using the fitz library (PyMuPDF). The system attempts to detect and extract the abstract
+       section. If an explicit abstract is not found, a portion of the document is used as a proxy abstract. The resulting text is
+       then sent to the selected SDG model for classification.<br/><br/>
+    2. <b>Pasted text:</b> When users paste text or an abstract directly into the web form, this input is treated as the abstract
+       without any PDF parsing. The text is sent as-is to the same selected SDG model for SDG classification.<br/><br/>
+    The model returns percentage scores (0–100%) for each SDG, indicating the degree of relevance between the input text and every goal.
+    Multiple SDGs can be associated with a single document depending on the model's confidence profile.<br/><br/>
+    This abstract/text-based analysis enables efficient and scalable SDG classification to support sustainability reporting,
+    research mapping, and strategic decision-making.
     """
     elements.append(Paragraph(notes, justified_style))
     elements.append(Spacer(1, 18))
+
+    # Divider image
     divider_path = "uploads/divider.png"
     img_reader = ImageReader(divider_path)
     orig_width, orig_height = img_reader.getSize()
 
-    # Hitung ukuran baru agar lebarnya sesuai dengan lebar halaman dikurangi margin
-    margin = 1 * inch  # margin kiri + kanan = 2 inch
+    margin = 1 * inch
     available_width = doc.pagesize[0] - margin
 
-    # Hitung rasio dan sesuaikan tinggi
     scale = available_width / orig_width
     new_width = available_width
     new_height = orig_height * scale
@@ -599,28 +652,32 @@ def download_result():
     elements.append(divider)
     elements.append(Spacer(1, 16))
 
+    # Meta info (tambahkan model di sini juga biar jelas)
+    elements.append(Paragraph(
+        f"<b>Model Used:</b> <font color='#0000FF'>{model_full_name}</font>", justified_style))
     elements.append(Paragraph(
         f"<b>Submission ID:</b> <font color='#0000FF'>{submission_id_str}</font>", justified_style))
     elements.append(Paragraph(
         f"<b>Submission Date:</b> <font color='#0000FF'>{submission_date_str}</font>", justified_style))
     elements.append(Paragraph(
         f"<b>File Name:</b> <font color='#0000FF'>{filename}</font>", justified_style))
-    
+
     if not sdg_ids:
-        elements.append(Paragraph("<b>SDG Detected:</b> <font color='#0000FF'>None</font>", justified_style))
+        elements.append(Paragraph(
+            "<b>SDG Detected (filter >30%):</b> <font color='#0000FF'>None</font>", justified_style))
     else:
         sdg_texts = [f"Goal {sid} – {SDG_NAMES.get(sid, 'Unknown')}" for sid in sdg_ids]
         sdg_line = "; ".join(sdg_texts)
-        elements.append(Paragraph(f"<b>SDG Detected:</b> <font color='#0000FF'>{sdg_line}</font>", justified_style))
+        elements.append(Paragraph(
+            f"<b>SDG Detected (filter >30%):</b> <font color='#0000FF'>{sdg_line}</font>", justified_style))
 
     elements.append(Spacer(1, 18))
 
     elements.append(PageBreak())
 
-
-    # Abstract
-    elements.append(Paragraph("Detected Abstract", heading_style))
-    elements.append(Paragraph(abstract, justified_style))
+    # Abstract / Text section (judul diganti)
+    elements.append(Paragraph("Detected Abstract / Text", heading_style))
+    elements.append(Paragraph(abstract or "-", justified_style))
     elements.append(Spacer(1, 18))
 
     # SDG Classification Results
@@ -629,7 +686,7 @@ def download_result():
     sorted_scores = sorted(sdg_scores.items(), key=lambda x: x[1], reverse=True)
     table_data = [["SDG", "Relevance (%)"]] + [[k, f"{v:.2f}%"] for k, v in sorted_scores]
 
-    table = Table(table_data, colWidths=[3*inch, 2*inch])
+    table = Table(table_data, colWidths=[3 * inch, 2 * inch])
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), HexColor("#31572C")),
         ("TEXTCOLOR", (0, 0), (-1, 0), HexColor("#FFFFFF")),
@@ -637,14 +694,16 @@ def download_result():
         ("ALIGN", (1, 1), (-1, -1), "RIGHT"),
         ("FONTSIZE", (0, 0), (-1, -1), 10),
         ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [HexColor("#F5F5F5"), HexColor("#FFFFFF")]),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+         [HexColor("#F5F5F5"), HexColor("#FFFFFF")]),
         ("GRID", (0, 0), (-1, -1), 0.5, HexColor("#CCCCCC"))
     ]))
 
     elements.append(table)
 
-    # Build and send PDF
-    doc.build(elements, onFirstPage=draw_first_page, onLaterPages=draw_footer)
+    # Build PDF
+    doc.build(elements, onFirstPage=draw_first_page,
+              onLaterPages=draw_footer)
     buffer.seek(0)
 
     return send_file(
@@ -654,7 +713,9 @@ def download_result():
         mimetype="application/pdf"
     )
 
+
 # ------------------ RUN ------------------
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
