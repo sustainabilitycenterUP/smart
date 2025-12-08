@@ -196,6 +196,45 @@ def process_single_pdf(pdf_path):
 def index():
     return "✅ API is running. Use /extract-abstract or /forminator-webhook."
 
+@app.route("/classify-text", methods=["POST"])
+def classify_text_api():
+    """
+    Klasifikasi langsung dari teks (tanpa PDF).
+    Body: JSON { "text": "..." }
+    Response: sama formatnya dengan /extract-abstract
+    """
+    data = request.get_json()
+    if not data or "text" not in data:
+        return jsonify({"status": "error", "message": "No text provided."}), 400
+
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"status": "error", "message": "Text is empty."}), 400
+
+    # di sini teks yang di-paste user kita perlakukan sebagai "abstract"
+    abstract = text
+
+    # pakai fungsi yang sudah ada
+    sdg_result = classify_with_aurora(abstract)
+
+    # untuk logging SDG-nya di DB (sama seperti PDF)
+    sdg_list = [
+        int(sdg.replace("Goal ", ""))
+        for sdg, score in sdg_result.items()
+        if score > 30
+    ]
+
+    # filename dummy untuk text input
+    submission_id = log_upload("TEXT_INPUT", request.remote_addr, sdg_list)
+
+    return jsonify({
+        "status": "success",
+        "abstract": abstract,
+        "sdg": sdg_result,
+        "submission_id": submission_id
+    })
+
+
 @app.route("/extract-abstract", methods=["POST"])
 def extract_abstract_api():
     if "file" not in request.files:
